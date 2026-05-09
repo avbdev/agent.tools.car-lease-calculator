@@ -28,3 +28,7 @@ yarn-error.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Firebase service account credentials — NEVER commit these
+*firebase-adminsdk*.json
+carlease-calculator-firebase-adminsdk-fbsvc-db0264119c.json
