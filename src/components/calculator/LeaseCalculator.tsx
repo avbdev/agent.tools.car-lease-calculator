@@ -39,6 +39,52 @@ const DEFAULT_INPUTS: LeaseInputs = {
   overageCostPerMile: 25,
 };
 
+// Numeric keys in LeaseInputs (all except boolean and termMonths/annualMileage which use selects)
+type NumericLeaseKey = Exclude<keyof LeaseInputs, 'taxOnFullCapCost' | 'termMonths' | 'annualMileage'>;
+
+/** Convert DEFAULT_INPUTS to raw string map for input display */
+function inputsToRaw(inputs: LeaseInputs): Record<NumericLeaseKey, string> {
+  return {
+    msrp: String(inputs.msrp),
+    salePrice: String(inputs.salePrice),
+    downPayment: String(inputs.downPayment),
+    tradeIn: String(inputs.tradeIn),
+    residualPercent: String(inputs.residualPercent),
+    moneyFactor: String(inputs.moneyFactor),
+    dispositionFee: String(inputs.dispositionFee),
+    acquisitionFee: String(inputs.acquisitionFee),
+    salesTaxRate: String(inputs.salesTaxRate),
+    registrationFees: String(inputs.registrationFees),
+    msdCount: String(inputs.msdCount),
+    gapInsuranceMonthly: String(inputs.gapInsuranceMonthly),
+    overageCostPerMile: String(inputs.overageCostPerMile),
+  };
+}
+
+/** Parse raw string map back to numeric inputs, using current inputs as fallback */
+function rawToInputs(raw: Record<NumericLeaseKey, string>, current: LeaseInputs): LeaseInputs {
+  const parse = (key: NumericLeaseKey): number => {
+    const v = parseFloat(raw[key]);
+    return isNaN(v) ? (current[key] as number) : v;
+  };
+  return {
+    ...current,
+    msrp: parse('msrp'),
+    salePrice: parse('salePrice'),
+    downPayment: parse('downPayment'),
+    tradeIn: parse('tradeIn'),
+    residualPercent: parse('residualPercent'),
+    moneyFactor: parse('moneyFactor'),
+    dispositionFee: parse('dispositionFee'),
+    acquisitionFee: parse('acquisitionFee'),
+    salesTaxRate: parse('salesTaxRate'),
+    registrationFees: parse('registrationFees'),
+    msdCount: Math.round(parse('msdCount')),
+    gapInsuranceMonthly: parse('gapInsuranceMonthly'),
+    overageCostPerMile: parse('overageCostPerMile'),
+  };
+}
+
 // ─── Tooltip Component ────────────────────────────────────────────────────────
 
 function Tooltip({ text }: { text: string }) {
@@ -66,23 +112,21 @@ function Tooltip({ text }: { text: string }) {
 }
 
 // ─── Input Field Component ────────────────────────────────────────────────────
+// Uses type="text" with inputMode="decimal" to allow empty state without browser coercion.
 
 interface InputFieldProps {
   label: string;
-  value: number | string;
+  value: string;
   onChange: (value: string) => void;
   tooltip?: string;
   prefix?: string;
   suffix?: string;
-  step?: number;
-  min?: number;
-  max?: number;
-  type?: string;
+  inputMode?: 'decimal' | 'numeric' | 'text';
   className?: string;
 }
 
 function InputField({
-  label, value, onChange, tooltip, prefix, suffix, step = 1, min = 0, max, type = 'number', className = ''
+  label, value, onChange, tooltip, prefix, suffix, inputMode = 'decimal', className = ''
 }: InputFieldProps) {
   return (
     <div className={`flex flex-col gap-1 ${className}`}>
@@ -95,12 +139,10 @@ function InputField({
           <span className="absolute left-3 text-gray-500 dark:text-gray-400 text-sm pointer-events-none">{prefix}</span>
         )}
         <input
-          type={type}
+          type="text"
+          inputMode={inputMode}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          step={step}
-          min={min}
-          max={max}
           className={`w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${prefix ? 'pl-7' : 'pl-3'} ${suffix ? 'pr-10' : 'pr-3'}`}
         />
         {suffix && (
@@ -143,42 +185,158 @@ function ResultRow({ label, value, highlight = false, tooltip }: {
   );
 }
 
+// ─── Quote Save/Load Modal ────────────────────────────────────────────────────
+
+interface QuoteSaveModalProps {
+  onSave: (label: string) => void;
+  onClose: () => void;
+  isSaving: boolean;
+}
+
+function QuoteSaveModal({ onSave, onClose, isSaving }: QuoteSaveModalProps) {
+  const [label, setLabel] = useState('');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div className="bg-white dark:bg-gray-900 rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Save Quote</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Give this quote a name so you can find it later.</p>
+        <input
+          type="text"
+          autoFocus
+          placeholder="e.g. BMW 3 Series deal"
+          value={label}
+          onChange={e => setLabel(e.target.value.slice(0, 60))}
+          onKeyDown={e => { if (e.key === 'Enter' && label.trim()) onSave(label.trim()); }}
+          className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={() => { if (label.trim()) onSave(label.trim()); }}
+            disabled={!label.trim() || isSaving}
+            className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+          >
+            {isSaving ? 'Saving…' : 'Save Quote'}
+          </button>
+          <button
+            onClick={onClose}
+            className="flex-1 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors font-medium"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface QuoteSuccessProps {
+  quoteId: string;
+  onClose: () => void;
+}
+
+function QuoteSuccessPanel({ quoteId, onClose }: QuoteSuccessProps) {
+  const [copiedId, setCopiedId] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/quote/${quoteId}` : `/quote/${quoteId}`;
+
+  const copyId = () => {
+    navigator.clipboard.writeText(quoteId).then(() => { setCopiedId(true); setTimeout(() => setCopiedId(false), 2000); });
+  };
+  const copyLink = () => {
+    navigator.clipboard.writeText(shareUrl).then(() => { setCopiedLink(true); setTimeout(() => setCopiedLink(false), 2000); });
+  };
+
+  return (
+    <div className="mt-3 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+      <div className="flex justify-between items-start mb-2">
+        <p className="text-sm font-semibold text-green-800 dark:text-green-300">✅ Quote saved!</p>
+        <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">✕</button>
+      </div>
+      <p className="text-xs text-green-700 dark:text-green-400 mb-3">Your Quote ID:</p>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="font-mono text-2xl font-bold text-green-800 dark:text-green-300 tracking-widest">{quoteId}</span>
+        <button onClick={copyId} className="text-xs px-2 py-1 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded hover:bg-green-200 dark:hover:bg-green-900/60 transition-colors">
+          {copiedId ? '✓ Copied' : 'Copy ID'}
+        </button>
+      </div>
+      <button
+        onClick={copyLink}
+        className="w-full text-xs py-2 px-3 bg-white dark:bg-gray-800 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors font-medium"
+      >
+        {copiedLink ? '✓ Link copied!' : '🔗 Copy shareable link'}
+      </button>
+      <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Quote expires in 90 days.</p>
+    </div>
+  );
+}
+
 // ─── Main Calculator Component ────────────────────────────────────────────────
 
-export function LeaseCalculator() {
-  const [inputs, setInputs] = useState<LeaseInputs>(DEFAULT_INPUTS);
+interface LeaseCalculatorProps {
+  /** Pre-populated inputs (e.g. from a shared /quote/[id] route) */
+  initialInputs?: LeaseInputs;
+  /** Metadata for a pre-loaded quote (shows a banner) */
+  quoteMeta?: { id: string; label: string; createdAt: string; expiresAt: string };
+}
+
+export function LeaseCalculator({ initialInputs, quoteMeta: initialQuoteMeta }: LeaseCalculatorProps = {}) {
+  const startInputs = initialInputs ?? DEFAULT_INPUTS;
+  const [inputs, setInputs] = useState<LeaseInputs>(startInputs);
+  // rawInputs holds exactly what the user typed — separate from parsed inputs
+  const [rawInputs, setRawInputs] = useState<Record<NumericLeaseKey, string>>(inputsToRaw(startInputs));
+  const [rawActualMiles, setRawActualMiles] = useState('15000');
   const [results, setResults] = useState<LeaseResults | null>(null);
   const [amortization, setAmortization] = useState<AmortizationRow[]>([]);
   const [showAmortization, setShowAmortization] = useState(false);
   const [showComparison, setShowComparison] = useState(false);
   const [comparison, setComparison] = useState<ComparisonResults | null>(null);
-  const [loanAPR, setLoanAPR] = useState(6.5);
-  const [pcpAPR, setPcpAPR] = useState(5.5);
-  const [aprInput, setAprInput] = useState('3.0'); // for MF↔APR display
+  const [rawLoanAPR, setRawLoanAPR] = useState('6.5');
+  const [rawPcpAPR, setRawPcpAPR] = useState('5.5');
+  const [aprInput, setAprInput] = useState(convertMFtoAPR(startInputs.moneyFactor).toFixed(2));
   const [scenarios, setScenarios] = useState<SavedScenario[]>([]);
   const [scenarioName, setScenarioName] = useState('');
   const [showScenarios, setShowScenarios] = useState(false);
   const [dark, setDark] = useState(false);
-  const [actualMiles, setActualMiles] = useState(15000);
   const [urlCopied, setUrlCopied] = useState(false);
   const isInitialized = useRef(false);
 
-  // Load from URL on mount
+  // Quote save/load state
+  const [showQuoteSaveModal, setShowQuoteSaveModal] = useState(false);
+  const [isSavingQuote, setIsSavingQuote] = useState(false);
+  const [savedQuoteId, setSavedQuoteId] = useState<string | null>(null);
+  const [showLoadQuote, setShowLoadQuote] = useState(false);
+  const [loadQuoteId, setLoadQuoteId] = useState('');
+  const [loadQuoteError, setLoadQuoteError] = useState('');
+  const [isLoadingQuote, setIsLoadingQuote] = useState(false);
+  // initialQuoteMeta pre-populates when arriving via /quote/[id]
+  const [loadedQuoteMeta, setLoadedQuoteMeta] = useState<{ label: string; createdAt: string; expiresAt: string } | null>(
+    initialQuoteMeta ? { label: initialQuoteMeta.label, createdAt: initialQuoteMeta.createdAt, expiresAt: initialQuoteMeta.expiresAt } : null
+  );
+
+  // Load from URL on mount — skip URL decode if initialInputs was provided (server-side quote load)
   useEffect(() => {
     if (isInitialized.current) return;
     isInitialized.current = true;
 
-    const urlInputs = decodeLeaseInputsFromURL(window.location.search, DEFAULT_INPUTS);
-    setInputs(urlInputs);
+    if (!initialInputs) {
+      const urlInputs = decodeLeaseInputsFromURL(window.location.search, DEFAULT_INPUTS);
+      setInputs(urlInputs);
+      setRawInputs(inputsToRaw(urlInputs));
+      setAprInput(convertMFtoAPR(urlInputs.moneyFactor).toFixed(2));
+    }
 
     const saved = loadScenarios();
     setScenarios(saved);
 
     // Theme from localStorage
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'dark') {
-      setDark(true);
-      document.documentElement.classList.add('dark');
+    try {
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme === 'dark') {
+        setDark(true);
+        document.documentElement.classList.add('dark');
+      }
+    } catch {
+      // localStorage unavailable
     }
   }, []);
 
@@ -186,39 +344,53 @@ export function LeaseCalculator() {
   useEffect(() => {
     if (dark) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
+      try { localStorage.setItem('theme', 'dark'); } catch { /* noop */ }
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
+      try { localStorage.setItem('theme', 'light'); } catch { /* noop */ }
     }
   }, [dark]);
 
-  // Recalculate on input change
+  // Recalculate on input change — skip if any critical field is empty/invalid
   useEffect(() => {
     try {
       const r = calculateLease(inputs);
+      if (!isFinite(r.monthlyPayment) || r.monthlyPayment < 0) return;
       setResults(r);
       setAmortization(calculateAmortizationSchedule(inputs));
-      setAprInput(convertMFtoAPR(inputs.moneyFactor).toFixed(2));
       if (showComparison) {
-        setComparison(compareLeaseVsBuy(inputs, loanAPR, pcpAPR));
+        const loanAPR = parseFloat(rawLoanAPR);
+        const pcpAPR = parseFloat(rawPcpAPR);
+        if (isFinite(loanAPR) && isFinite(pcpAPR)) {
+          setComparison(compareLeaseVsBuy(inputs, loanAPR, pcpAPR));
+        }
       }
     } catch {
-      // Invalid inputs — don't update
+      // Invalid inputs — keep previous results visible
     }
-  }, [inputs, showComparison, loanAPR, pcpAPR]);
+  }, [inputs, showComparison, rawLoanAPR, rawPcpAPR]);
+
+  /** Update a raw string for a numeric input and sync parsed inputs */
+  const handleRaw = useCallback((key: NumericLeaseKey) => (raw: string) => {
+    setRawInputs(prev => {
+      const next = { ...prev, [key]: raw };
+      // Parse all raw values and update inputs
+      setInputs(cur => rawToInputs(next, cur));
+      return next;
+    });
+  }, []);
 
   const updateInput = useCallback(<K extends keyof LeaseInputs>(key: K, value: LeaseInputs[K]) => {
     setInputs(prev => ({ ...prev, [key]: value }));
   }, []);
 
-  const handleNum = useCallback((key: keyof LeaseInputs) => (raw: string) => {
-    const n = parseFloat(raw);
-    if (!isNaN(n)) updateInput(key, n as LeaseInputs[typeof key]);
-  }, [updateInput]);
-
   const handleReset = () => {
     setInputs(DEFAULT_INPUTS);
+    setRawInputs(inputsToRaw(DEFAULT_INPUTS));
+    setRawActualMiles('15000');
+    setAprInput(convertMFtoAPR(DEFAULT_INPUTS.moneyFactor).toFixed(2));
+    setSavedQuoteId(null);
+    setLoadedQuoteMeta(null);
     window.history.replaceState(null, '', window.location.pathname);
   };
 
@@ -241,6 +413,8 @@ export function LeaseCalculator() {
 
   const handleLoadScenario = (scenario: SavedScenario) => {
     setInputs(scenario.inputs);
+    setRawInputs(inputsToRaw(scenario.inputs));
+    setAprInput(convertMFtoAPR(scenario.inputs.moneyFactor).toFixed(2));
   };
 
   const handleDeleteScenario = (id: string) => {
@@ -250,8 +424,64 @@ export function LeaseCalculator() {
 
   const handlePrint = () => window.print();
 
+  // Quote: save
+  const handleSaveQuote = async (label: string) => {
+    setIsSavingQuote(true);
+    try {
+      const res = await fetch('/api/quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label, inputs }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert((err as { error?: string }).error ?? 'Failed to save quote. Please try again.');
+        return;
+      }
+      const data = await res.json() as { id: string };
+      setSavedQuoteId(data.id);
+      setShowQuoteSaveModal(false);
+    } catch {
+      alert('Network error saving quote. Please check your connection.');
+    } finally {
+      setIsSavingQuote(false);
+    }
+  };
+
+  // Quote: load
+  const handleLoadQuote = async () => {
+    const id = loadQuoteId.trim().toUpperCase();
+    if (!id) return;
+    setIsLoadingQuote(true);
+    setLoadQuoteError('');
+    try {
+      const res = await fetch(`/api/quotes/${id}`);
+      if (res.status === 404) {
+        setLoadQuoteError('Quote not found or expired. Check the ID and try again.');
+        return;
+      }
+      if (!res.ok) {
+        setLoadQuoteError('Error loading quote. Please try again.');
+        return;
+      }
+      const data = await res.json() as { inputs: LeaseInputs; label: string; createdAt: string; expiresAt: string };
+      setInputs(data.inputs);
+      setRawInputs(inputsToRaw(data.inputs));
+      setAprInput(convertMFtoAPR(data.inputs.moneyFactor).toFixed(2));
+      setLoadedQuoteMeta({ label: data.label, createdAt: data.createdAt, expiresAt: data.expiresAt });
+      setShowLoadQuote(false);
+      setLoadQuoteId('');
+    } catch {
+      setLoadQuoteError('Network error. Please check your connection.');
+    } finally {
+      setIsLoadingQuote(false);
+    }
+  };
+
+  const actualMiles = parseFloat(rawActualMiles);
+  const safeActualMiles = isFinite(actualMiles) && actualMiles >= 0 ? actualMiles : 0;
   const mileageOverage = calculateMileageOverage(
-    actualMiles,
+    safeActualMiles,
     inputs.annualMileage,
     inputs.termMonths,
     inputs.overageCostPerMile
@@ -259,6 +489,15 @@ export function LeaseCalculator() {
 
   return (
     <div className={`min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 transition-colors`}>
+      {/* Quote Save Modal */}
+      {showQuoteSaveModal && (
+        <QuoteSaveModal
+          onSave={handleSaveQuote}
+          onClose={() => setShowQuoteSaveModal(false)}
+          isSaving={isSavingQuote}
+        />
+      )}
+
       {/* Header */}
       <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-40 no-print">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -292,6 +531,21 @@ export function LeaseCalculator() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
+        {/* Loaded quote banner */}
+        {loadedQuoteMeta && (
+          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex justify-between items-center">
+            <div>
+              <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">
+                📋 Quote loaded: {loadedQuoteMeta.label}
+              </p>
+              <p className="text-xs text-blue-600 dark:text-blue-400">
+                Saved {new Date(loadedQuoteMeta.createdAt).toLocaleDateString()} · Expires {new Date(loadedQuoteMeta.expiresAt).toLocaleDateString()}
+              </p>
+            </div>
+            <button onClick={() => setLoadedQuoteMeta(null)} className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 ml-4">✕</button>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           {/* ─── Left Panel: Inputs ─── */}
           <div className="xl:col-span-1 space-y-4">
@@ -301,29 +555,29 @@ export function LeaseCalculator() {
               <div className="grid grid-cols-2 gap-3">
                 <InputField
                   label="MSRP"
-                  value={inputs.msrp}
-                  onChange={handleNum('msrp')}
+                  value={rawInputs.msrp}
+                  onChange={handleRaw('msrp')}
                   prefix="$"
                   tooltip="Manufacturer's Suggested Retail Price — the sticker price before any negotiation."
                 />
                 <InputField
                   label="Sale Price"
-                  value={inputs.salePrice}
-                  onChange={handleNum('salePrice')}
+                  value={rawInputs.salePrice}
+                  onChange={handleRaw('salePrice')}
                   prefix="$"
                   tooltip="Your negotiated price. Lower is better — this becomes your cap cost."
                 />
                 <InputField
                   label="Down Payment"
-                  value={inputs.downPayment}
-                  onChange={handleNum('downPayment')}
+                  value={rawInputs.downPayment}
+                  onChange={handleRaw('downPayment')}
                   prefix="$"
                   tooltip="Cap cost reduction paid upfront. Reduces monthly payment but is not refundable if the car is totaled."
                 />
                 <InputField
                   label="Trade-In Value"
-                  value={inputs.tradeIn}
-                  onChange={handleNum('tradeIn')}
+                  value={rawInputs.tradeIn}
+                  onChange={handleRaw('tradeIn')}
                   prefix="$"
                   tooltip="Value of your current vehicle applied to reduce the cap cost."
                 />
@@ -351,13 +605,10 @@ export function LeaseCalculator() {
                 </div>
                 <InputField
                   label="Residual %"
-                  value={inputs.residualPercent}
-                  onChange={handleNum('residualPercent')}
+                  value={rawInputs.residualPercent}
+                  onChange={handleRaw('residualPercent')}
                   suffix="%"
                   tooltip="The percentage of MSRP the car is worth at lease end. Higher = lower payment. Set by the manufacturer."
-                  step={0.5}
-                  min={20}
-                  max={90}
                 />
               </div>
 
@@ -370,17 +621,14 @@ export function LeaseCalculator() {
                 <div className="grid grid-cols-2 gap-2">
                   <InputField
                     label="Money Factor"
-                    value={inputs.moneyFactor}
+                    value={rawInputs.moneyFactor}
                     onChange={(v) => {
+                      handleRaw('moneyFactor')(v);
                       const mf = parseFloat(v);
-                      if (!isNaN(mf) && mf >= 0) {
-                        updateInput('moneyFactor', mf);
+                      if (isFinite(mf) && mf >= 0) {
                         setAprInput(convertMFtoAPR(mf).toFixed(2));
                       }
                     }}
-                    step={0.00001}
-                    min={0}
-                    max={0.01}
                     tooltip="Lease rate expressed as a decimal (e.g. 0.00125 = 3% APR). Multiply by 2400 to compare to loan APR."
                   />
                   <InputField
@@ -389,13 +637,13 @@ export function LeaseCalculator() {
                     onChange={(v) => {
                       setAprInput(v);
                       const apr = parseFloat(v);
-                      if (!isNaN(apr) && apr >= 0) {
-                        updateInput('moneyFactor', convertAPRtoMF(apr));
+                      if (isFinite(apr) && apr >= 0) {
+                        const mf = convertAPRtoMF(apr);
+                        updateInput('moneyFactor', mf);
+                        setRawInputs(prev => ({ ...prev, moneyFactor: String(mf) }));
                       }
                     }}
                     suffix="%"
-                    step={0.1}
-                    min={0}
                     tooltip="Approximate APR equivalent. Enter APR here to auto-fill the money factor."
                   />
                 </div>
@@ -408,22 +656,22 @@ export function LeaseCalculator() {
               <div className="grid grid-cols-2 gap-3">
                 <InputField
                   label="Acquisition Fee"
-                  value={inputs.acquisitionFee}
-                  onChange={handleNum('acquisitionFee')}
+                  value={rawInputs.acquisitionFee}
+                  onChange={handleRaw('acquisitionFee')}
                   prefix="$"
                   tooltip="Bank fee for originating the lease. Typically $500–$1,200. Often rolled into the cap cost."
                 />
                 <InputField
                   label="Disposition Fee"
-                  value={inputs.dispositionFee}
-                  onChange={handleNum('dispositionFee')}
+                  value={rawInputs.dispositionFee}
+                  onChange={handleRaw('dispositionFee')}
                   prefix="$"
                   tooltip="Fee charged at lease end if you don't buy the car or lease another from the same brand. Typically $300–$500."
                 />
                 <InputField
                   label="Reg/Doc Fees"
-                  value={inputs.registrationFees}
-                  onChange={handleNum('registrationFees')}
+                  value={rawInputs.registrationFees}
+                  onChange={handleRaw('registrationFees')}
                   prefix="$"
                   tooltip="Registration, title, and documentation fees paid at lease signing."
                 />
@@ -438,6 +686,7 @@ export function LeaseCalculator() {
                       if (preset) {
                         updateInput('salesTaxRate', preset.rate);
                         updateInput('taxOnFullCapCost', preset.taxMethod === 'full_cap_cost');
+                        setRawInputs(prev => ({ ...prev, salesTaxRate: String(preset.rate) }));
                       }
                     }}
                     className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -450,12 +699,9 @@ export function LeaseCalculator() {
                 </div>
                 <InputField
                   label="Sales Tax Rate"
-                  value={inputs.salesTaxRate}
-                  onChange={handleNum('salesTaxRate')}
+                  value={rawInputs.salesTaxRate}
+                  onChange={handleRaw('salesTaxRate')}
                   suffix="%"
-                  step={0.1}
-                  min={0}
-                  max={15}
                   tooltip="Local sales tax rate. Can vary from state base rate by county/city."
                 />
                 <div className="flex flex-col gap-1">
@@ -481,22 +727,18 @@ export function LeaseCalculator() {
               <div className="grid grid-cols-2 gap-3">
                 <InputField
                   label="MSD Count"
-                  value={inputs.msdCount}
-                  onChange={handleNum('msdCount')}
+                  value={rawInputs.msdCount}
+                  onChange={handleRaw('msdCount')}
+                  inputMode="numeric"
                   tooltip="Multiple Security Deposits: each deposit reduces your money factor by ~0.00007. Refundable at lease end. Max varies by lender."
-                  min={0}
-                  max={10}
-                  step={1}
                 />
                 <InputField
                   label="GAP Insurance"
-                  value={inputs.gapInsuranceMonthly}
-                  onChange={handleNum('gapInsuranceMonthly')}
+                  value={rawInputs.gapInsuranceMonthly}
+                  onChange={handleRaw('gapInsuranceMonthly')}
                   prefix="$"
                   suffix="/mo"
                   tooltip="Guaranteed Asset Protection covers the gap between insurance payout and remaining lease balance if the car is totaled."
-                  min={0}
-                  step={1}
                 />
                 <div className="flex flex-col gap-1">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center">
@@ -515,13 +757,10 @@ export function LeaseCalculator() {
                 </div>
                 <InputField
                   label="Overage Cost"
-                  value={inputs.overageCostPerMile}
-                  onChange={handleNum('overageCostPerMile')}
+                  value={rawInputs.overageCostPerMile}
+                  onChange={handleRaw('overageCostPerMile')}
                   suffix="¢/mi"
                   tooltip="Per-mile fee for driving over your annual mileage limit. Typically 10–30 cents per mile."
-                  min={5}
-                  max={50}
-                  step={1}
                 />
               </div>
             </div>
@@ -657,16 +896,66 @@ export function LeaseCalculator() {
                   </div>
                 </div>
 
+                {/* Quote Save / Load — no-print */}
+                <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4 no-print">
+                  <div className="flex justify-between items-center mb-3">
+                    <SectionHeader title="Save &amp; Share Quote" icon="📤" />
+                    <button
+                      onClick={() => setShowLoadQuote(s => !s)}
+                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      {showLoadQuote ? 'Hide' : 'Load'} quote
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => { setSavedQuoteId(null); setShowQuoteSaveModal(true); }}
+                    className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors mb-3"
+                  >
+                    💾 Save this quote
+                  </button>
+
+                  {savedQuoteId && (
+                    <QuoteSuccessPanel quoteId={savedQuoteId} onClose={() => setSavedQuoteId(null)} />
+                  )}
+
+                  {showLoadQuote && (
+                    <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Load a saved quote by ID</p>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Enter Quote ID (e.g. LZ4K9RMX)"
+                          value={loadQuoteId}
+                          onChange={e => { setLoadQuoteId(e.target.value.toUpperCase().slice(0, 8)); setLoadQuoteError(''); }}
+                          onKeyDown={e => { if (e.key === 'Enter') handleLoadQuote(); }}
+                          className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 py-1.5 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono tracking-widest uppercase"
+                          maxLength={8}
+                        />
+                        <button
+                          onClick={handleLoadQuote}
+                          disabled={isLoadingQuote || loadQuoteId.length < 8}
+                          className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {isLoadingQuote ? '…' : 'Load'}
+                        </button>
+                      </div>
+                      {loadQuoteError && (
+                        <p className="text-xs text-red-600 dark:text-red-400 mt-2">{loadQuoteError}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Mileage Overage Calculator */}
                 <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
                   <SectionHeader title="Mileage Overage Calculator" icon="🛣️" />
                   <div className="flex flex-wrap gap-4 items-end">
                     <InputField
                       label="Your actual miles/year"
-                      value={actualMiles}
-                      onChange={(v) => { const n = parseInt(v); if (!isNaN(n)) setActualMiles(n); }}
-                      step={500}
-                      min={0}
+                      value={rawActualMiles}
+                      onChange={setRawActualMiles}
+                      inputMode="numeric"
                       className="flex-1 min-w-40"
                     />
                     <div className="flex-1 min-w-40 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
@@ -676,7 +965,7 @@ export function LeaseCalculator() {
                       </p>
                       {mileageOverage > 0 && (
                         <p className="text-xs text-gray-500 mt-1">
-                          Over by {((actualMiles - inputs.annualMileage) * (inputs.termMonths / 12)).toLocaleString()} miles
+                          Over by {((safeActualMiles - inputs.annualMileage) * (inputs.termMonths / 12)).toLocaleString()} miles
                         </p>
                       )}
                     </div>
@@ -691,7 +980,11 @@ export function LeaseCalculator() {
                       onClick={() => {
                         setShowComparison(s => !s);
                         if (!showComparison) {
-                          setComparison(compareLeaseVsBuy(inputs, loanAPR, pcpAPR));
+                          const loanAPR = parseFloat(rawLoanAPR);
+                          const pcpAPR = parseFloat(rawPcpAPR);
+                          if (isFinite(loanAPR) && isFinite(pcpAPR)) {
+                            setComparison(compareLeaseVsBuy(inputs, loanAPR, pcpAPR));
+                          }
                         }
                       }}
                       className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
@@ -705,18 +998,16 @@ export function LeaseCalculator() {
                       <div className="grid grid-cols-2 gap-3 mb-4">
                         <InputField
                           label="Loan APR (Buy)"
-                          value={loanAPR}
-                          onChange={(v) => { const n = parseFloat(v); if (!isNaN(n)) setLoanAPR(n); }}
+                          value={rawLoanAPR}
+                          onChange={setRawLoanAPR}
                           suffix="%"
-                          step={0.1}
                           tooltip="Interest rate for a conventional auto loan to purchase the vehicle."
                         />
                         <InputField
                           label="PCP APR"
-                          value={pcpAPR}
-                          onChange={(v) => { const n = parseFloat(v); if (!isNaN(n)) setPcpAPR(n); }}
+                          value={rawPcpAPR}
+                          onChange={setRawPcpAPR}
                           suffix="%"
-                          step={0.1}
                           tooltip="Personal Contract Purchase rate — financing only the depreciation portion with a balloon payment at the end."
                         />
                       </div>
