@@ -18,6 +18,7 @@ import { LeaseInputs } from "./lease-calculator";
 import { createHash } from "crypto";
 
 const COLLECTION = "quotes";
+const RATE_LIMITS_COLLECTION = "rate_limits";
 const QUOTE_TTL_DAYS = 90;
 const ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const ID_LENGTH = 8;
@@ -58,20 +59,47 @@ function hashIp(ip: string): string {
 }
 
 // ─── Rate limiting ───────────────────────────────────────────────────────────
+//
+// Uses a separate `rate_limits` collection with one document per IP hash.
+// Document ID = ipHash, shape: { count: number, windowStart: string (ISO) }
+// A single-document read+write inside a transaction requires NO composite index.
 
 export async function checkRateLimit(ip: string): Promise<boolean> {
   const { db } = getFirebaseAdmin();
   const ipHash = hashIp(ip);
-  const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS);
+  const rateLimitRef = db.collection(RATE_LIMITS_COLLECTION).doc(ipHash);
 
-  const snap = await db
-    .collection(COLLECTION)
-    .where("ipHash", "==", ipHash)
-    .where("createdAt", ">=", windowStart)
-    .count()
-    .get();
+  let allowed = true;
 
-  return snap.data().count < RATE_LIMIT_MAX;
+  await db.runTransaction(async (tx) => {
+    const doc = await tx.get(rateLimitRef);
+    const now = new Date();
+    const windowCutoff = new Date(now.getTime() - RATE_LIMIT_WINDOW_MS);
+
+    if (!doc.exists) {
+      // First request ever from this IP — create the window
+      tx.set(rateLimitRef, { count: 1, windowStart: now.toISOString() });
+      return;
+    }
+
+    const data = doc.data()!;
+    const docWindowStart = new Date(data.windowStart as string);
+
+    if (docWindowStart < windowCutoff) {
+      // Previous window has expired — reset
+      tx.set(rateLimitRef, { count: 1, windowStart: now.toISOString() });
+      return;
+    }
+
+    if ((data.count as number) >= RATE_LIMIT_MAX) {
+      allowed = false;
+      return;
+    }
+
+    tx.update(rateLimitRef, { count: (data.count as number) + 1 });
+  });
+
+  return allowed;
 }
 
 // ─── Save quote ──────────────────────────────────────────────────────────────
