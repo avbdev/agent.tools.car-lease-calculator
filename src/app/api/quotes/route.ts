@@ -8,14 +8,14 @@
  * Response 201:
  *   { id, label, createdAt, expiresAt }
  *
- * Response 400: validation error
+ * Response 400: validation error (with Zod error details)
  * Response 429: rate limit exceeded
  * Response 500: internal error
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { saveQuote, checkRateLimit } from "@/lib/quotes";
-import { LeaseInputs } from "@/lib/lease-calculator";
+import { SaveQuoteBodySchema } from "@/lib/schemas";
 
 function getClientIp(req: NextRequest): string {
   return (
@@ -25,35 +25,6 @@ function getClientIp(req: NextRequest): string {
   );
 }
 
-function isValidInputs(inputs: unknown): inputs is LeaseInputs {
-  if (!inputs || typeof inputs !== "object") return false;
-  const i = inputs as Record<string, unknown>;
-  // Validate required numeric fields — must match LeaseInputs exactly
-  const requiredNumbers = [
-    "msrp",
-    "salePrice",
-    "tradeIn",
-    "downPayment",
-    "moneyFactor",
-    "residualPercent",
-    "termMonths",
-    "annualMileage",
-    "acquisitionFee",
-    "dispositionFee",
-    "salesTaxRate",
-    "registrationFees",
-    "msdCount",
-    "gapInsuranceMonthly",
-    "overageCostPerMile",
-  ];
-  for (const field of requiredNumbers) {
-    if (typeof i[field] !== "number" || !isFinite(i[field] as number)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json().catch(() => null);
@@ -61,21 +32,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const { inputs, label } = body as { inputs: unknown; label: unknown };
-
-    if (!isValidInputs(inputs)) {
+    const parsed = SaveQuoteBodySchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid or incomplete lease inputs" },
+        {
+          error: "Validation failed",
+          details: parsed.error.flatten(),
+        },
         { status: 400 }
       );
     }
 
-    if (typeof label !== "string") {
-      return NextResponse.json(
-        { error: "Label must be a string" },
-        { status: 400 }
-      );
-    }
+    const { inputs, label } = parsed.data;
 
     const ip = getClientIp(req);
     const allowed = await checkRateLimit(ip);
