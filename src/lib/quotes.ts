@@ -63,6 +63,11 @@ function hashIp(ip: string): string {
 // Uses a separate `rate_limits` collection with one document per IP hash.
 // Document ID = ipHash, shape: { count: number, windowStart: string (ISO) }
 // A single-document read+write inside a transaction requires NO composite index.
+//
+// NOTE: This rate limiter uses Firestore as the backing store (rate_limits collection).
+// This works correctly across all Vercel serverless function instances since state
+// is stored in Firestore, not in-memory. Each request reads/writes the rate_limits
+// document transactionally, ensuring consistency across instances.
 
 export async function checkRateLimit(ip: string): Promise<boolean> {
   const { db } = getFirebaseAdmin();
